@@ -55,18 +55,10 @@ function fmtPct(n) {
   return s + fmt(n, 2) + "%";
 }
 
-// Fake price fetch — in produzione userai Yahoo Finance proxy
-async function fetchPrice(ticker, type) {
-  await new Promise((r) => setTimeout(r, 400 + Math.random() * 600));
-  // Simulazione: restituisce un prezzo ±15% casuale rispetto al PMC salvato
-  return null; // null = usa prezzo manuale
-}
-
 export default function App() {
   const [page, setPage] = useState("dashboard");
   const [data, setData] = useState(loadData);
-  const [prices, setPrices] = useState({});
-  const [loadingPrices, setLoadingPrices] = useState(false);
+  const [prices] = useState({});
   const [toast, setToast] = useState(null);
 
   useEffect(() => {
@@ -81,8 +73,7 @@ export default function App() {
   function aggiornaPosizioneConMovimento(pos, mov) {
     if (mov.tipo === "acquisto" || mov.tipo === "pac") {
       const nuovaQta = pos.quantita + mov.quantita;
-      const nuovoPMC =
-        (pos.quantita * pos.pmc + mov.quantita * mov.prezzo) / nuovaQta;
+      const nuovoPMC = (pos.quantita * pos.pmc + mov.quantita * mov.prezzo) / nuovaQta;
       return { ...pos, quantita: nuovaQta, pmc: nuovoPMC };
     }
     if (mov.tipo === "vendita") {
@@ -125,10 +116,8 @@ export default function App() {
 
   function addMovimento(mov) {
     setData((d) => {
-      const pos = d.posizioni.find(
-        (p) => p.ticker === mov.ticker.toUpperCase()
-      );
-      if (!pos && (mov.tipo === "vendita")) {
+      const pos = d.posizioni.find((p) => p.ticker === mov.ticker.toUpperCase());
+      if (!pos && mov.tipo === "vendita") {
         showToast("Ticker non trovato nel portafoglio", "warn");
         return d;
       }
@@ -151,7 +140,12 @@ export default function App() {
         };
         nuovePosizioni = [...d.posizioni, nuova];
       }
-      const newMov = { ...mov, id: Date.now(), ticker: mov.ticker.toUpperCase(), data: mov.data || new Date().toISOString().slice(0, 10) };
+      const newMov = {
+        ...mov,
+        id: Date.now(),
+        ticker: mov.ticker.toUpperCase(),
+        data: mov.data || new Date().toISOString().slice(0, 10),
+      };
       showToast(`Movimento ${mov.tipo} registrato`);
       return { posizioni: nuovePosizioni, movimenti: [newMov, ...d.movimenti] };
     });
@@ -179,7 +173,7 @@ export default function App() {
   return (
     <div style={{ minHeight: "100vh", background: "#0a0a0f", color: "#e8e6df", fontFamily: "'DM Sans', 'Segoe UI', sans-serif" }}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600&family=DM+Mono:wght@400;500&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap');
         * { box-sizing: border-box; margin: 0; padding: 0; }
         ::-webkit-scrollbar { width: 4px; } ::-webkit-scrollbar-track { background: transparent; } ::-webkit-scrollbar-thumb { background: #2a2a35; border-radius: 2px; }
         input, select, textarea { background: #13131a; border: 1px solid #2a2a38; border-radius: 8px; color: #e8e6df; padding: 10px 14px; font-family: inherit; font-size: 14px; width: 100%; outline: none; transition: border-color .18s; }
@@ -207,7 +201,6 @@ export default function App() {
         .mono { font-family: 'DM Mono', monospace; }
       `}</style>
 
-      {/* SIDEBAR */}
       <div style={{ display: "flex", minHeight: "100vh" }}>
         <nav style={{ width: 220, background: "#0d0d14", borderRight: "1px solid #1a1a25", padding: "28px 16px", display: "flex", flexDirection: "column", gap: 4, flexShrink: 0 }}>
           <div style={{ marginBottom: 32, paddingLeft: 8 }}>
@@ -221,16 +214,9 @@ export default function App() {
               style={{
                 background: page === n.id ? "#1a1a28" : "transparent",
                 color: page === n.id ? "#e8e6df" : "#6a6878",
-                border: "none",
-                borderRadius: 10,
-                padding: "11px 14px",
-                textAlign: "left",
-                display: "flex",
-                alignItems: "center",
-                gap: 10,
-                fontWeight: page === n.id ? 500 : 400,
-                fontSize: 14,
-                transition: "all .15s",
+                border: "none", borderRadius: 10, padding: "11px 14px",
+                textAlign: "left", display: "flex", alignItems: "center", gap: 10,
+                fontWeight: page === n.id ? 500 : 400, fontSize: 14, transition: "all .15s",
               }}
             >
               <span style={{ fontSize: 16, opacity: .8 }}>{n.icon}</span>
@@ -242,7 +228,6 @@ export default function App() {
           </div>
         </nav>
 
-        {/* MAIN */}
         <main style={{ flex: 1, padding: "32px 36px", overflowY: "auto", maxWidth: "calc(100vw - 220px)" }}>
           {page === "dashboard" && <Dashboard posizioni={posizioni} totali={totali} data={data} />}
           {page === "portafoglio" && <Portafoglio posizioni={posizioni} onAdd={addPosizione} onEdit={editPosizione} onDelete={deletePosizione} />}
@@ -251,14 +236,13 @@ export default function App() {
         </main>
       </div>
 
-      {/* TOAST */}
       {toast && (
         <div style={{
-          position: "fixed", bottom: 24, right: 24, background: toast.type === "warn" ? "#2a1f0a" : "#0f2a1a",
+          position: "fixed", bottom: 24, right: 24,
+          background: toast.type === "warn" ? "#2a1f0a" : "#0f2a1a",
           border: `1px solid ${toast.type === "warn" ? "#4a3010" : "#1a4a2a"}`,
           color: toast.type === "warn" ? "#EF9F27" : "#4ecb8d",
           padding: "12px 20px", borderRadius: 12, fontSize: 14, zIndex: 200,
-          animation: "fadeIn .2s ease",
         }}>
           {toast.msg}
         </div>
@@ -271,10 +255,10 @@ export default function App() {
 function Dashboard({ posizioni, totali, data }) {
   const byType = useMemo(() => {
     const map = {};
-    posizioni.forEach((p) => {
-      map[p.tipo] = (map[p.tipo] || 0) + p.valoreMercato;
-    });
-    return Object.entries(map).map(([tipo, val]) => ({ tipo, val, pct: totali.totValore > 0 ? (val / totali.totValore) * 100 : 0 }));
+    posizioni.forEach((p) => { map[p.tipo] = (map[p.tipo] || 0) + p.valoreMercato; });
+    return Object.entries(map).map(([tipo, val]) => ({
+      tipo, val, pct: totali.totValore > 0 ? (val / totali.totValore) * 100 : 0,
+    }));
   }, [posizioni, totali]);
 
   const topPos = [...posizioni].sort((a, b) => b.valoreMercato - a.valoreMercato).slice(0, 5);
@@ -283,7 +267,9 @@ function Dashboard({ posizioni, totali, data }) {
   return (
     <div>
       <h1 style={{ fontSize: 26, fontWeight: 600, marginBottom: 6, letterSpacing: "-.02em" }}>Dashboard</h1>
-      <p style={{ color: "#5a5868", fontSize: 14, marginBottom: 28 }}>{new Date().toLocaleDateString("it-IT", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</p>
+      <p style={{ color: "#5a5868", fontSize: 14, marginBottom: 28 }}>
+        {new Date().toLocaleDateString("it-IT", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
+      </p>
 
       {posizioni.length === 0 ? (
         <div className="card" style={{ textAlign: "center", padding: 60, color: "#4a4858" }}>
@@ -293,11 +279,10 @@ function Dashboard({ posizioni, totali, data }) {
         </div>
       ) : (
         <>
-          {/* KPI */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 14, marginBottom: 24 }}>
             {[
-              { label: "Valore totale", val: fmtEur(totali.totValore), sub: null },
-              { label: "Costo di carico", val: fmtEur(totali.totCosto), sub: null },
+              { label: "Valore totale", val: fmtEur(totali.totValore) },
+              { label: "Costo di carico", val: fmtEur(totali.totCosto) },
               { label: "P&L latente", val: fmtEur(totali.totPL), sub: fmtPct(totali.totPLpct), positive: totali.totPL >= 0 },
               { label: "Posizioni aperte", val: posizioni.length, sub: `${byType.length} classi` },
             ].map((k) => (
@@ -309,7 +294,6 @@ function Dashboard({ posizioni, totali, data }) {
             ))}
           </div>
 
-          {/* ALERT CONCENTRAZIONE */}
           {rischioConc.length > 0 && (
             <div style={{ background: "#1f1808", border: "1px solid #3a2e08", borderRadius: 12, padding: "14px 18px", marginBottom: 24, display: "flex", alignItems: "center", gap: 12 }}>
               <span style={{ fontSize: 18 }}>⚠</span>
@@ -323,7 +307,6 @@ function Dashboard({ posizioni, totali, data }) {
           )}
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 20 }}>
-            {/* ALLOCAZIONE */}
             <div className="card">
               <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 16, color: "#9a98a0" }}>Allocazione per classe</div>
               {byType.map(({ tipo, val, pct }) => (
@@ -336,13 +319,12 @@ function Dashboard({ posizioni, totali, data }) {
                     <span className="mono" style={{ color: "#9a98a0" }}>{fmt(pct, 1)}%</span>
                   </div>
                   <div style={{ background: "#1a1a25", borderRadius: 4, height: 4, overflow: "hidden" }}>
-                    <div style={{ width: `${pct}%`, height: "100%", background: ASSET_COLORS[tipo], borderRadius: 4, transition: "width .4s ease" }} />
+                    <div style={{ width: `${pct}%`, height: "100%", background: ASSET_COLORS[tipo], borderRadius: 4 }} />
                   </div>
                 </div>
               ))}
             </div>
 
-            {/* TOP POSIZIONI */}
             <div className="card">
               <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 16, color: "#9a98a0" }}>Posizioni principali</div>
               {topPos.map((p, i) => (
@@ -356,24 +338,19 @@ function Dashboard({ posizioni, totali, data }) {
                   </div>
                   <div style={{ textAlign: "right" }}>
                     <div className="mono" style={{ fontSize: 13 }}>{fmtEur(p.valoreMercato)}</div>
-                    <div style={{ fontSize: 11, color: totali.totValore > 0 ? "#5a6888" : "#5a5868" }}>
-                      {fmt(totali.totValore > 0 ? (p.valoreMercato / totali.totValore) * 100 : 0, 1)}%
-                    </div>
+                    <div style={{ fontSize: 11, color: "#5a6888" }}>{fmt(totali.totValore > 0 ? (p.valoreMercato / totali.totValore) * 100 : 0, 1)}%</div>
                   </div>
                 </div>
               ))}
             </div>
           </div>
 
-          {/* PERFORMANCE PER POSIZIONE */}
           <div className="card">
             <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 16, color: "#9a98a0" }}>Performance posizioni</div>
             <div style={{ overflowX: "auto" }}>
               <table>
                 <thead>
-                  <tr>
-                    <th>Ticker</th><th>Tipo</th><th>Qtà</th><th>PMC</th><th>Prezzo att.</th><th>Valore</th><th>P&L</th><th>P&L %</th>
-                  </tr>
+                  <tr><th>Ticker</th><th>Tipo</th><th>Qtà</th><th>PMC</th><th>Prezzo att.</th><th>Valore</th><th>P&L</th><th>P&L %</th></tr>
                 </thead>
                 <tbody>
                   {[...posizioni].sort((a, b) => b.valoreMercato - a.valoreMercato).map((p) => (
@@ -402,71 +379,27 @@ function Dashboard({ posizioni, totali, data }) {
 function Portafoglio({ posizioni, onAdd, onEdit, onDelete }) {
   const [showAdd, setShowAdd] = useState(false);
   const [editTarget, setEditTarget] = useState(null);
-  const [form, setForm] = useState({ ticker: "", nome: "", tipo: "Azione", quantita: "", pmc: "", prezzoManuale: "" });
 
-  function resetForm() {
-    setForm({ ticker: "", nome: "", tipo: "Azione", quantita: "", pmc: "", prezzoManuale: "" });
-  }
-
-  function handleAdd(e) {
-    e.preventDefault();
-    if (!form.ticker || !form.quantita || !form.pmc) return;
-    onAdd({ ...form, quantita: parseFloat(form.quantita), pmc: parseFloat(form.pmc), prezzoManuale: form.prezzoManuale ? parseFloat(form.prezzoManuale) : parseFloat(form.pmc) });
-    resetForm();
+  function handleAdd(formData) {
+    if (!formData.ticker || !formData.quantita || !formData.pmc) return;
+    onAdd({
+      ...formData,
+      quantita: parseFloat(formData.quantita),
+      pmc: parseFloat(formData.pmc),
+      prezzoManuale: formData.prezzoManuale ? parseFloat(formData.prezzoManuale) : parseFloat(formData.pmc),
+    });
     setShowAdd(false);
   }
 
-  function handleEdit(e) {
-    e.preventDefault();
-    onEdit(editTarget.id, { ...form, quantita: parseFloat(form.quantita), pmc: parseFloat(form.pmc), prezzoManuale: form.prezzoManuale ? parseFloat(form.prezzoManuale) : parseFloat(form.pmc) });
+  function handleEdit(formData) {
+    onEdit(editTarget.id, {
+      ...formData,
+      quantita: parseFloat(formData.quantita),
+      pmc: parseFloat(formData.pmc),
+      prezzoManuale: formData.prezzoManuale ? parseFloat(formData.prezzoManuale) : parseFloat(formData.pmc),
+    });
     setEditTarget(null);
-    resetForm();
   }
-
-  function startEdit(p) {
-    setEditTarget(p);
-    setForm({ ticker: p.ticker, nome: p.nome || "", tipo: p.tipo, quantita: p.quantita, pmc: p.pmc, prezzoManuale: p.prezzoManuale || p.pmc });
-  }
-
-  const F = ({ label, k, type = "text", placeholder, opts }) => (
-    <div style={{ marginBottom: 14 }}>
-      <label>{label}</label>
-      {opts ? (
-        <select value={form[k]} onChange={e => setForm(f => ({ ...f, [k]: e.target.value }))}>
-          {opts.map(o => <option key={o}>{o}</option>)}
-        </select>
-      ) : (
-        <input type={type} placeholder={placeholder} value={form[k]} onChange={e => setForm(f => ({ ...f, [k]: e.target.value }))} />
-      )}
-    </div>
-  );
-
-  const ModalForm = ({ title, onSubmit, onClose }) => (
-    <div className="modal-bg" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="modal">
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 22 }}>
-          <div style={{ fontSize: 16, fontWeight: 600 }}>{title}</div>
-          <button className="btn-ghost" style={{ padding: "4px 10px" }} onClick={onClose}>✕</button>
-        </div>
-        <form onSubmit={onSubmit}>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 14px" }}>
-            <F label="TICKER *" k="ticker" placeholder="es. ENEL.MI" />
-            <F label="NOME" k="nome" placeholder="es. Enel SpA" />
-          </div>
-          <F label="TIPO ASSET" k="tipo" opts={ASSET_TYPES} />
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 14px" }}>
-            <F label="QUANTITÀ *" k="quantita" type="number" placeholder="0" />
-            <F label="PMC (€) *" k="pmc" type="number" placeholder="0.00" />
-          </div>
-          <F label="PREZZO ATTUALE (€) — lascia vuoto = usa PMC" k="prezzoManuale" type="number" placeholder="0.00" />
-          <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
-            <button type="submit" className="btn-primary" style={{ flex: 1 }}>Salva</button>
-            <button type="button" className="btn-ghost" onClick={onClose}>Annulla</button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
 
   return (
     <div>
@@ -475,7 +408,7 @@ function Portafoglio({ posizioni, onAdd, onEdit, onDelete }) {
           <h1 style={{ fontSize: 26, fontWeight: 600, letterSpacing: "-.02em" }}>Portafoglio</h1>
           <p style={{ color: "#5a5868", fontSize: 14, marginTop: 4 }}>Gestisci le tue posizioni — aggiorna PMC e prezzo corrente manualmente</p>
         </div>
-        <button className="btn-primary" onClick={() => { resetForm(); setShowAdd(true); }}>+ Aggiungi posizione</button>
+        <button className="btn-primary" onClick={() => setShowAdd(true)}>+ Aggiungi posizione</button>
       </div>
 
       {posizioni.length === 0 ? (
@@ -519,7 +452,7 @@ function Portafoglio({ posizioni, onAdd, onEdit, onDelete }) {
                 <div className={`mono ${p.plLatente >= 0 ? "pl-pos" : "pl-neg"}`} style={{ fontSize: 14 }}>{fmtPct(p.plPct)}</div>
               </div>
               <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
-                <button className="btn-ghost" style={{ padding: "7px 12px", fontSize: 13 }} onClick={() => startEdit(p)}>Modifica</button>
+                <button className="btn-ghost" style={{ padding: "7px 12px", fontSize: 13 }} onClick={() => setEditTarget(p)}>Modifica</button>
                 <button className="btn-danger" style={{ padding: "7px 12px", fontSize: 13 }} onClick={() => onDelete(p.id)}>✕</button>
               </div>
             </div>
@@ -527,29 +460,96 @@ function Portafoglio({ posizioni, onAdd, onEdit, onDelete }) {
         </div>
       )}
 
-      {showAdd && <ModalForm title="Nuova posizione" onSubmit={handleAdd} onClose={() => setShowAdd(false)} />}
-      {editTarget && <ModalForm title={`Modifica ${editTarget.ticker}`} onSubmit={handleEdit} onClose={() => { setEditTarget(null); resetForm(); }} />}
+      {showAdd && <PosizioneModal title="Nuova posizione" onSubmit={handleAdd} onClose={() => setShowAdd(false)} />}
+      {editTarget && <PosizioneModal title={`Modifica ${editTarget.ticker}`} initial={editTarget} onSubmit={handleEdit} onClose={() => setEditTarget(null)} />}
+    </div>
+  );
+}
+
+function PosizioneModal({ title, initial, onSubmit, onClose }) {
+  const [ticker, setTicker] = useState(initial?.ticker || "");
+  const [nome, setNome] = useState(initial?.nome || "");
+  const [tipo, setTipo] = useState(initial?.tipo || "Azione");
+  const [quantita, setQuantita] = useState(initial?.quantita?.toString() || "");
+  const [pmc, setPmc] = useState(initial?.pmc?.toString() || "");
+  const [prezzoManuale, setPrezzoManuale] = useState(initial?.prezzoManuale?.toString() || "");
+
+  function handleSubmit(e) {
+    e.preventDefault();
+    onSubmit({ ticker, nome, tipo, quantita, pmc, prezzoManuale });
+  }
+
+  return (
+    <div className="modal-bg" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal">
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 22 }}>
+          <div style={{ fontSize: 16, fontWeight: 600 }}>{title}</div>
+          <button className="btn-ghost" style={{ padding: "4px 10px" }} onClick={onClose}>✕</button>
+        </div>
+        <form onSubmit={handleSubmit}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 14px" }}>
+            <div style={{ marginBottom: 14 }}>
+              <label>TICKER *</label>
+              <input placeholder="es. ENEL.MI" value={ticker} onChange={e => setTicker(e.target.value)} />
+            </div>
+            <div style={{ marginBottom: 14 }}>
+              <label>NOME</label>
+              <input placeholder="es. Enel SpA" value={nome} onChange={e => setNome(e.target.value)} />
+            </div>
+          </div>
+          <div style={{ marginBottom: 14 }}>
+            <label>TIPO ASSET</label>
+            <select value={tipo} onChange={e => setTipo(e.target.value)}>
+              {ASSET_TYPES.map(t => <option key={t}>{t}</option>)}
+            </select>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 14px" }}>
+            <div style={{ marginBottom: 14 }}>
+              <label>QUANTITÀ *</label>
+              <input type="number" placeholder="0" value={quantita} onChange={e => setQuantita(e.target.value)} />
+            </div>
+            <div style={{ marginBottom: 14 }}>
+              <label>PMC (€) *</label>
+              <input type="number" placeholder="0.00" value={pmc} onChange={e => setPmc(e.target.value)} />
+            </div>
+          </div>
+          <div style={{ marginBottom: 14 }}>
+            <label>PREZZO ATTUALE (€) — lascia vuoto = usa PMC</label>
+            <input type="number" placeholder="0.00" value={prezzoManuale} onChange={e => setPrezzoManuale(e.target.value)} />
+          </div>
+          <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+            <button type="submit" className="btn-primary" style={{ flex: 1 }}>Salva</button>
+            <button type="button" className="btn-ghost" onClick={onClose}>Annulla</button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }
 
 /* ─── MOVIMENTI ─── */
 function Movimenti({ movimenti, posizioni, onAdd }) {
-  const [form, setForm] = useState({ ticker: "", tipo: "acquisto", tipoAsset: "Azione", quantita: "", prezzo: "", note: "", data: new Date().toISOString().slice(0, 10) });
   const [showForm, setShowForm] = useState(false);
+  const [ticker, setTicker] = useState("");
+  const [tipo, setTipo] = useState("acquisto");
+  const [tipoAsset, setTipoAsset] = useState("Azione");
+  const [quantita, setQuantita] = useState("");
+  const [prezzo, setPrezzo] = useState("");
+  const [note, setNote] = useState("");
+  const [data, setData] = useState(new Date().toISOString().slice(0, 10));
 
   const TIPI = ["acquisto", "pac", "vendita", "dividendo"];
   const TIPO_COLORS = { acquisto: "#4ecb8d", pac: "#378ADD", vendita: "#e24b4a", dividendo: "#EF9F27" };
+  const tickerSuggest = [...new Set(posizioni.map(p => p.ticker))];
 
   function handleSubmit(e) {
     e.preventDefault();
-    if (!form.ticker || !form.quantita || !form.prezzo) return;
-    onAdd({ ...form, quantita: parseFloat(form.quantita), prezzo: parseFloat(form.prezzo) });
-    setForm({ ticker: "", tipo: "acquisto", tipoAsset: "Azione", quantita: "", prezzo: "", note: "", data: new Date().toISOString().slice(0, 10) });
+    if (!ticker || !quantita || !prezzo) return;
+    onAdd({ ticker, tipo, tipoAsset, quantita: parseFloat(quantita), prezzo: parseFloat(prezzo), note, data });
+    setTicker(""); setTipo("acquisto"); setQuantita(""); setPrezzo(""); setNote("");
+    setData(new Date().toISOString().slice(0, 10));
     setShowForm(false);
   }
-
-  const tickerSuggest = [...new Set(posizioni.map(p => p.ticker))];
 
   return (
     <div>
@@ -568,41 +568,41 @@ function Movimenti({ movimenti, posizioni, onAdd }) {
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 14 }}>
               <div>
                 <label>TIPO</label>
-                <select value={form.tipo} onChange={e => setForm(f => ({ ...f, tipo: e.target.value }))}>
+                <select value={tipo} onChange={e => setTipo(e.target.value)}>
                   {TIPI.map(t => <option key={t}>{t}</option>)}
                 </select>
               </div>
               <div>
                 <label>TICKER</label>
-                <input list="ticker-list" value={form.ticker} onChange={e => setForm(f => ({ ...f, ticker: e.target.value.toUpperCase() }))} placeholder="es. ENEL.MI" />
+                <input list="ticker-list" value={ticker} onChange={e => setTicker(e.target.value.toUpperCase())} placeholder="es. ENEL.MI" />
                 <datalist id="ticker-list">{tickerSuggest.map(t => <option key={t} value={t} />)}</datalist>
               </div>
-              {(form.tipo === "acquisto" || form.tipo === "pac") && (
+              {(tipo === "acquisto" || tipo === "pac") && (
                 <div>
                   <label>TIPO ASSET</label>
-                  <select value={form.tipoAsset} onChange={e => setForm(f => ({ ...f, tipoAsset: e.target.value }))}>
+                  <select value={tipoAsset} onChange={e => setTipoAsset(e.target.value)}>
                     {ASSET_TYPES.map(t => <option key={t}>{t}</option>)}
                   </select>
                 </div>
               )}
               <div>
-                <label>{form.tipo === "dividendo" ? "IMPORTO (€)" : "QUANTITÀ"}</label>
-                <input type="number" step="any" value={form.quantita} onChange={e => setForm(f => ({ ...f, quantita: e.target.value }))} placeholder="0" />
+                <label>{tipo === "dividendo" ? "IMPORTO (€)" : "QUANTITÀ"}</label>
+                <input type="number" step="any" value={quantita} onChange={e => setQuantita(e.target.value)} placeholder="0" />
               </div>
-              {form.tipo !== "dividendo" && (
+              {tipo !== "dividendo" && (
                 <div>
                   <label>PREZZO (€)</label>
-                  <input type="number" step="any" value={form.prezzo} onChange={e => setForm(f => ({ ...f, prezzo: e.target.value }))} placeholder="0.00" />
+                  <input type="number" step="any" value={prezzo} onChange={e => setPrezzo(e.target.value)} placeholder="0.00" />
                 </div>
               )}
               <div>
                 <label>DATA</label>
-                <input type="date" value={form.data} onChange={e => setForm(f => ({ ...f, data: e.target.value }))} />
+                <input type="date" value={data} onChange={e => setData(e.target.value)} />
               </div>
             </div>
             <div style={{ marginTop: 14 }}>
               <label>NOTE (opzionale)</label>
-              <input value={form.note} onChange={e => setForm(f => ({ ...f, note: e.target.value }))} placeholder="es. PAC mensile" />
+              <input value={note} onChange={e => setNote(e.target.value)} placeholder="es. PAC mensile" />
             </div>
             <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
               <button type="submit" className="btn-primary">Registra</button>
@@ -622,19 +622,13 @@ function Movimenti({ movimenti, posizioni, onAdd }) {
         <div className="card" style={{ padding: 0, overflow: "hidden" }}>
           <table>
             <thead>
-              <tr>
-                <th>Data</th><th>Tipo</th><th>Ticker</th><th>Quantità</th><th>Prezzo</th><th>Controvalore</th><th>Note</th>
-              </tr>
+              <tr><th>Data</th><th>Tipo</th><th>Ticker</th><th>Quantità</th><th>Prezzo</th><th>Controvalore</th><th>Note</th></tr>
             </thead>
             <tbody>
               {movimenti.map((m) => (
                 <tr key={m.id}>
                   <td style={{ color: "#5a5868", fontSize: 13 }}>{m.data}</td>
-                  <td>
-                    <span className="tag" style={{ background: (TIPO_COLORS[m.tipo] || "#888") + "22", color: TIPO_COLORS[m.tipo] || "#888" }}>
-                      {m.tipo}
-                    </span>
-                  </td>
+                  <td><span className="tag" style={{ background: (TIPO_COLORS[m.tipo] || "#888") + "22", color: TIPO_COLORS[m.tipo] || "#888" }}>{m.tipo}</span></td>
                   <td style={{ fontWeight: 500 }}>{m.ticker}</td>
                   <td className="mono">{fmt(m.quantita, 4)}</td>
                   <td className="mono">{m.tipo === "dividendo" ? "—" : fmtEur(m.prezzo)}</td>
@@ -672,9 +666,8 @@ function CercaTitolo() {
       if (!q) throw new Error("Titolo non trovato");
       const meta = q.meta;
       const closes = q.indicators?.quote?.[0]?.close || [];
-      const timestamps = q.timestamp || [];
-      setResult({ meta, closes, timestamps, ticker });
-    } catch (e) {
+      setResult({ meta, closes, ticker });
+    } catch {
       setError("Titolo non trovato o errore di rete. Prova con il ticker Yahoo (es. ENEL.MI, AAPL, BTC-USD)");
     }
     setLoading(false);
@@ -686,31 +679,18 @@ function CercaTitolo() {
       <p style={{ color: "#5a5868", fontSize: 14, marginBottom: 28 }}>Inserisci il ticker Yahoo Finance — es. ENEL.MI · AAPL · BTC-USD · VWCE.AS</p>
 
       <div style={{ display: "flex", gap: 10, marginBottom: 24 }}>
-        <input
-          value={query}
-          onChange={e => setQuery(e.target.value)}
-          onKeyDown={e => e.key === "Enter" && search()}
-          placeholder="Ticker (es. ENI.MI, AAPL, BTC-USD)"
-          style={{ maxWidth: 320 }}
-        />
-        <button className="btn-primary" onClick={search} disabled={loading}>
-          {loading ? "Carico..." : "Cerca"}
-        </button>
+        <input value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => e.key === "Enter" && search()} placeholder="Ticker (es. ENI.MI, AAPL, BTC-USD)" style={{ maxWidth: 320 }} />
+        <button className="btn-primary" onClick={search} disabled={loading}>{loading ? "Carico..." : "Cerca"}</button>
       </div>
 
-      {error && (
-        <div style={{ background: "#1f0808", border: "1px solid #3a1010", borderRadius: 12, padding: "14px 18px", color: "#e24b4a", fontSize: 13 }}>
-          {error}
-        </div>
-      )}
-
+      {error && <div style={{ background: "#1f0808", border: "1px solid #3a1010", borderRadius: 12, padding: "14px 18px", color: "#e24b4a", fontSize: 13 }}>{error}</div>}
       {result && <TitoloCard result={result} />}
     </div>
   );
 }
 
 function TitoloCard({ result }) {
-  const { meta, closes, timestamps, ticker } = result;
+  const { meta, closes, ticker } = result;
   const validCloses = closes.filter(c => c != null);
   const last = validCloses[validCloses.length - 1];
   const first = validCloses[0];
@@ -744,11 +724,10 @@ function TitoloCard({ result }) {
           <polyline points={pts} fill="none" stroke={change >= 0 ? "#4ecb8d" : "#e24b4a"} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
         </svg>
       </div>
-
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10 }}>
         {[
           { label: "Prezzo attuale", val: `${fmt(meta.regularMarketPrice, 2)} ${currency}` },
-          { label: "Prezzo precedente", val: `${fmt(meta.chartPreviousClose, 2)} ${currency}` },
+          { label: "Chiusura prec.", val: `${fmt(meta.chartPreviousClose, 2)} ${currency}` },
           { label: "52w High", val: `${fmt(meta["fiftyTwoWeekHigh"], 2)} ${currency}` },
           { label: "52w Low", val: `${fmt(meta["fiftyTwoWeekLow"], 2)} ${currency}` },
           { label: "Valuta", val: currency },

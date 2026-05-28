@@ -1,4 +1,6 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
+
+const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbx9cxN1nOmdkS01NcrLrHJRtaZ6oTVyL9kOLFu1LJOU4gg8WsuyuTye8HG3JJOwsgwb/exec";
 
 const ASSET_TYPES = ["Azione", "ETF", "Fondo", "Crypto"];
 
@@ -18,7 +20,7 @@ const NAV_ITEMS = [
 
 const STORAGE_KEY = "portafoglio_v1";
 
-function loadData() {
+function loadLocal() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return { posizioni: [], movimenti: [] };
@@ -28,8 +30,19 @@ function loadData() {
   }
 }
 
-function saveData(data) {
+function saveLocal(data) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+}
+
+async function loadFromSheets() {
+  const res = await fetch(`${SCRIPT_URL}?action=load`);
+  const json = await res.json();
+  return json;
+}
+
+async function saveToSheets(data) {
+  const url = `${SCRIPT_URL}?action=save&data=${encodeURIComponent(JSON.stringify(data))}`;
+  await fetch(url);
 }
 
 function fmt(n, decimals = 2) {
@@ -57,12 +70,31 @@ function fmtPct(n) {
 
 export default function App() {
   const [page, setPage] = useState("dashboard");
-  const [data, setData] = useState(loadData);
+  const [data, setData] = useState(loadLocal);
   const [prices] = useState({});
   const [toast, setToast] = useState(null);
+  const [syncing, setSyncing] = useState(false);
+  const [lastSync, setLastSync] = useState(null);
+  const [loadingCloud, setLoadingCloud] = useState(true);
 
+  // Carica da Sheets all'avvio
   useEffect(() => {
-    saveData(data);
+    setLoadingCloud(true);
+    loadFromSheets()
+      .then((remote) => {
+        if (remote && !remote.error && (remote.posizioni?.length > 0 || remote.movimenti?.length > 0)) {
+          setData(remote);
+          saveLocal(remote);
+          setLastSync(new Date());
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoadingCloud(false));
+  }, []);
+
+  // Salva locale ad ogni cambio
+  useEffect(() => {
+    saveLocal(data);
   }, [data]);
 
   function showToast(msg, type = "ok") {
@@ -70,14 +102,25 @@ export default function App() {
     setTimeout(() => setToast(null), 2800);
   }
 
+  async function syncToCloud(newData) {
+    setSyncing(true);
+    try {
+      await saveToSheets(newData);
+      setLastSync(new Date());
+    } catch {
+      showToast("Errore sincronizzazione cloud", "warn");
+    }
+    setSyncing(false);
+  }
+
   function aggiornaPosizioneConMovimento(pos, mov) {
     if (mov.tipo === "acquisto" || mov.tipo === "pac") {
-      const nuovaQta = pos.quantita + mov.quantita;
-      const nuovoPMC = (pos.quantita * pos.pmc + mov.quantita * mov.prezzo) / nuovaQta;
+      const nuovaQta = Number(pos.quantita) + Number(mov.quantita);
+      const nuovoPMC = (Number(pos.quantita) * Number(pos.pmc) + Number(mov.quantita) * Number(mov.prezzo)) / nuovaQta;
       return { ...pos, quantita: nuovaQta, pmc: nuovoPMC };
     }
     if (mov.tipo === "vendita") {
-      const nuovaQta = Math.max(0, pos.quantita - mov.quantita);
+      const nuovaQta = Math.max(0, Number(pos.quantita) - Number(mov.quantita));
       return { ...pos, quantita: nuovaQta };
     }
     return pos;
@@ -93,25 +136,29 @@ export default function App() {
         return d;
       }
       const nuova = { ...p, id: Date.now(), ticker: p.ticker.toUpperCase() };
-      showToast(`${nuova.ticker} aggiunto al portafoglio`);
-      return { ...d, posizioni: [...d.posizioni, nuova] };
+      const newData = { ...d, posizioni: [...d.posizioni, nuova] };
+      showToast(`${nuova.ticker} aggiunto`);
+      syncToCloud(newData);
+      return newData;
     });
   }
 
   function editPosizione(id, updates) {
-    setData((d) => ({
-      ...d,
-      posizioni: d.posizioni.map((p) => (p.id === id ? { ...p, ...updates } : p)),
-    }));
-    showToast("Posizione aggiornata");
+    setData((d) => {
+      const newData = { ...d, posizioni: d.posizioni.map((p) => (p.id === id ? { ...p, ...updates } : p)) };
+      showToast("Posizione aggiornata");
+      syncToCloud(newData);
+      return newData;
+    });
   }
 
   function deletePosizione(id) {
-    setData((d) => ({
-      ...d,
-      posizioni: d.posizioni.filter((p) => p.id !== id),
-    }));
-    showToast("Posizione rimossa");
+    setData((d) => {
+      const newData = { ...d, posizioni: d.posizioni.filter((p) => p.id !== id) };
+      showToast("Posizione rimossa");
+      syncToCloud(newData);
+      return newData;
+    });
   }
 
   function addMovimento(mov) {
@@ -124,38 +171,28 @@ export default function App() {
       let nuovePosizioni = d.posizioni;
       if (pos) {
         nuovePosizioni = d.posizioni.map((p) =>
-          p.ticker === mov.ticker.toUpperCase()
-            ? aggiornaPosizioneConMovimento(p, mov)
-            : p
+          p.ticker === mov.ticker.toUpperCase() ? aggiornaPosizioneConMovimento(p, mov) : p
         );
       } else {
         const nuova = {
-          id: Date.now(),
-          ticker: mov.ticker.toUpperCase(),
-          nome: mov.ticker.toUpperCase(),
-          tipo: mov.tipoAsset || "Azione",
-          quantita: mov.quantita,
-          pmc: mov.prezzo,
-          prezzoManuale: mov.prezzo,
+          id: Date.now(), ticker: mov.ticker.toUpperCase(), nome: mov.ticker.toUpperCase(),
+          tipo: mov.tipoAsset || "Azione", quantita: mov.quantita, pmc: mov.prezzo, prezzoManuale: mov.prezzo,
         };
         nuovePosizioni = [...d.posizioni, nuova];
       }
-      const newMov = {
-        ...mov,
-        id: Date.now(),
-        ticker: mov.ticker.toUpperCase(),
-        data: mov.data || new Date().toISOString().slice(0, 10),
-      };
+      const newMov = { ...mov, id: Date.now(), ticker: mov.ticker.toUpperCase(), data: mov.data || new Date().toISOString().slice(0, 10) };
+      const newData = { posizioni: nuovePosizioni, movimenti: [newMov, ...d.movimenti] };
       showToast(`Movimento ${mov.tipo} registrato`);
-      return { posizioni: nuovePosizioni, movimenti: [newMov, ...d.movimenti] };
+      syncToCloud(newData);
+      return newData;
     });
   }
 
   const posizioni = useMemo(() => {
     return data.posizioni.map((p) => {
       const prezzoLive = prices[p.ticker] ?? p.prezzoManuale ?? p.pmc;
-      const valoreMercato = prezzoLive * p.quantita;
-      const costoCarico = p.pmc * p.quantita;
+      const valoreMercato = Number(prezzoLive) * Number(p.quantita);
+      const costoCarico = Number(p.pmc) * Number(p.quantita);
       const plLatente = valoreMercato - costoCarico;
       const plPct = costoCarico > 0 ? (plLatente / costoCarico) * 100 : 0;
       return { ...p, prezzoLive, valoreMercato, costoCarico, plLatente, plPct };
@@ -199,6 +236,8 @@ export default function App() {
         tr:last-child td { border-bottom: none; }
         tr:hover td { background: #16161f; }
         .mono { font-family: 'DM Mono', monospace; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .spin { animation: spin 1s linear infinite; display: inline-block; }
       `}</style>
 
       <div style={{ display: "flex", minHeight: "100vh" }}>
@@ -208,31 +247,39 @@ export default function App() {
             <div style={{ fontSize: 11, color: "#4a4858", marginTop: 2, letterSpacing: ".06em" }}>TRACKER PERSONALE</div>
           </div>
           {NAV_ITEMS.map((n) => (
-            <button
-              key={n.id}
-              onClick={() => setPage(n.id)}
-              style={{
-                background: page === n.id ? "#1a1a28" : "transparent",
-                color: page === n.id ? "#e8e6df" : "#6a6878",
-                border: "none", borderRadius: 10, padding: "11px 14px",
-                textAlign: "left", display: "flex", alignItems: "center", gap: 10,
-                fontWeight: page === n.id ? 500 : 400, fontSize: 14, transition: "all .15s",
-              }}
-            >
+            <button key={n.id} onClick={() => setPage(n.id)} style={{
+              background: page === n.id ? "#1a1a28" : "transparent",
+              color: page === n.id ? "#e8e6df" : "#6a6878",
+              border: "none", borderRadius: 10, padding: "11px 14px",
+              textAlign: "left", display: "flex", alignItems: "center", gap: 10,
+              fontWeight: page === n.id ? 500 : 400, fontSize: 14, transition: "all .15s",
+            }}>
               <span style={{ fontSize: 16, opacity: .8 }}>{n.icon}</span>
               {n.label}
             </button>
           ))}
           <div style={{ marginTop: "auto", paddingLeft: 8 }}>
-            <div style={{ fontSize: 11, color: "#3a3848" }}>{data.posizioni.length} posizioni</div>
+            <div style={{ fontSize: 11, color: "#3a3848", marginBottom: 4 }}>{data.posizioni.length} posizioni</div>
+            <div style={{ fontSize: 11, color: syncing ? "#378ADD" : lastSync ? "#1D9E75" : "#3a3848", display: "flex", alignItems: "center", gap: 4 }}>
+              {syncing ? <><span className="spin">↻</span> Sync...</> : lastSync ? `✓ Sync ${lastSync.toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}` : "○ Locale"}
+            </div>
           </div>
         </nav>
 
         <main style={{ flex: 1, padding: "32px 36px", overflowY: "auto", maxWidth: "calc(100vw - 220px)" }}>
-          {page === "dashboard" && <Dashboard posizioni={posizioni} totali={totali} data={data} />}
-          {page === "portafoglio" && <Portafoglio posizioni={posizioni} onAdd={addPosizione} onEdit={editPosizione} onDelete={deletePosizione} />}
-          {page === "movimenti" && <Movimenti movimenti={data.movimenti} posizioni={data.posizioni} onAdd={addMovimento} />}
-          {page === "cerca" && <CercaTitolo />}
+          {loadingCloud ? (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "60vh", flexDirection: "column", gap: 16, color: "#4a4858" }}>
+              <span className="spin" style={{ fontSize: 32 }}>↻</span>
+              <div style={{ fontSize: 14 }}>Carico dati dal cloud...</div>
+            </div>
+          ) : (
+            <>
+              {page === "dashboard" && <Dashboard posizioni={posizioni} totali={totali} data={data} />}
+              {page === "portafoglio" && <Portafoglio posizioni={posizioni} onAdd={addPosizione} onEdit={editPosizione} onDelete={deletePosizione} />}
+              {page === "movimenti" && <Movimenti movimenti={data.movimenti} posizioni={data.posizioni} onAdd={addMovimento} />}
+              {page === "cerca" && <CercaTitolo />}
+            </>
+          )}
         </main>
       </div>
 
@@ -252,7 +299,7 @@ export default function App() {
 }
 
 /* ─── DASHBOARD ─── */
-function Dashboard({ posizioni, totali, data }) {
+function Dashboard({ posizioni, totali }) {
   const byType = useMemo(() => {
     const map = {};
     posizioni.forEach((p) => { map[p.tipo] = (map[p.tipo] || 0) + p.valoreMercato; });
@@ -300,7 +347,7 @@ function Dashboard({ posizioni, totali, data }) {
               <div>
                 <div style={{ fontSize: 13, fontWeight: 500, color: "#EF9F27" }}>Concentrazione elevata</div>
                 <div style={{ fontSize: 12, color: "#8a7a40", marginTop: 2 }}>
-                  {rischioConc.map(p => `${p.ticker} (${fmt((p.valoreMercato / totali.totValore) * 100, 1)}%)`).join(", ")} supera il 25% del portafoglio
+                  {rischioConc.map(p => `${p.ticker} (${fmt((p.valoreMercato / totali.totValore) * 100, 1)}%)`).join(", ")} supera il 25%
                 </div>
               </div>
             </div>
@@ -309,7 +356,7 @@ function Dashboard({ posizioni, totali, data }) {
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 20 }}>
             <div className="card">
               <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 16, color: "#9a98a0" }}>Allocazione per classe</div>
-              {byType.map(({ tipo, val, pct }) => (
+              {byType.map(({ tipo, pct }) => (
                 <div key={tipo} style={{ marginBottom: 12 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 6 }}>
                     <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -324,7 +371,6 @@ function Dashboard({ posizioni, totali, data }) {
                 </div>
               ))}
             </div>
-
             <div className="card">
               <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 16, color: "#9a98a0" }}>Posizioni principali</div>
               {topPos.map((p, i) => (
@@ -382,22 +428,12 @@ function Portafoglio({ posizioni, onAdd, onEdit, onDelete }) {
 
   function handleAdd(formData) {
     if (!formData.ticker || !formData.quantita || !formData.pmc) return;
-    onAdd({
-      ...formData,
-      quantita: parseFloat(formData.quantita),
-      pmc: parseFloat(formData.pmc),
-      prezzoManuale: formData.prezzoManuale ? parseFloat(formData.prezzoManuale) : parseFloat(formData.pmc),
-    });
+    onAdd({ ...formData, quantita: parseFloat(formData.quantita), pmc: parseFloat(formData.pmc), prezzoManuale: formData.prezzoManuale ? parseFloat(formData.prezzoManuale) : parseFloat(formData.pmc) });
     setShowAdd(false);
   }
 
   function handleEdit(formData) {
-    onEdit(editTarget.id, {
-      ...formData,
-      quantita: parseFloat(formData.quantita),
-      pmc: parseFloat(formData.pmc),
-      prezzoManuale: formData.prezzoManuale ? parseFloat(formData.prezzoManuale) : parseFloat(formData.pmc),
-    });
+    onEdit(editTarget.id, { ...formData, quantita: parseFloat(formData.quantita), pmc: parseFloat(formData.pmc), prezzoManuale: formData.prezzoManuale ? parseFloat(formData.prezzoManuale) : parseFloat(formData.pmc) });
     setEditTarget(null);
   }
 
@@ -556,54 +592,29 @@ function Movimenti({ movimenti, posizioni, onAdd }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 28 }}>
         <div>
           <h1 style={{ fontSize: 26, fontWeight: 600, letterSpacing: "-.02em" }}>Movimenti</h1>
-          <p style={{ color: "#5a5868", fontSize: 14, marginTop: 4 }}>Registra acquisti, PAC, vendite e dividendi — il PMC si aggiorna in automatico</p>
+          <p style={{ color: "#5a5868", fontSize: 14, marginTop: 4 }}>Registra acquisti, PAC, vendite e dividendi</p>
         </div>
         <button className="btn-primary" onClick={() => setShowForm(s => !s)}>{showForm ? "Chiudi" : "+ Nuovo movimento"}</button>
       </div>
 
       {showForm && (
         <div className="card" style={{ marginBottom: 24 }}>
-          <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 18, color: "#9a98a0" }}>Registra movimento</div>
           <form onSubmit={handleSubmit}>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 14 }}>
-              <div>
-                <label>TIPO</label>
-                <select value={tipo} onChange={e => setTipo(e.target.value)}>
-                  {TIPI.map(t => <option key={t}>{t}</option>)}
-                </select>
-              </div>
+              <div><label>TIPO</label><select value={tipo} onChange={e => setTipo(e.target.value)}>{TIPI.map(t => <option key={t}>{t}</option>)}</select></div>
               <div>
                 <label>TICKER</label>
                 <input list="ticker-list" value={ticker} onChange={e => setTicker(e.target.value.toUpperCase())} placeholder="es. ENEL.MI" />
                 <datalist id="ticker-list">{tickerSuggest.map(t => <option key={t} value={t} />)}</datalist>
               </div>
               {(tipo === "acquisto" || tipo === "pac") && (
-                <div>
-                  <label>TIPO ASSET</label>
-                  <select value={tipoAsset} onChange={e => setTipoAsset(e.target.value)}>
-                    {ASSET_TYPES.map(t => <option key={t}>{t}</option>)}
-                  </select>
-                </div>
+                <div><label>TIPO ASSET</label><select value={tipoAsset} onChange={e => setTipoAsset(e.target.value)}>{ASSET_TYPES.map(t => <option key={t}>{t}</option>)}</select></div>
               )}
-              <div>
-                <label>{tipo === "dividendo" ? "IMPORTO (€)" : "QUANTITÀ"}</label>
-                <input type="number" step="any" value={quantita} onChange={e => setQuantita(e.target.value)} placeholder="0" />
-              </div>
-              {tipo !== "dividendo" && (
-                <div>
-                  <label>PREZZO (€)</label>
-                  <input type="number" step="any" value={prezzo} onChange={e => setPrezzo(e.target.value)} placeholder="0.00" />
-                </div>
-              )}
-              <div>
-                <label>DATA</label>
-                <input type="date" value={data} onChange={e => setData(e.target.value)} />
-              </div>
+              <div><label>{tipo === "dividendo" ? "IMPORTO (€)" : "QUANTITÀ"}</label><input type="number" step="any" value={quantita} onChange={e => setQuantita(e.target.value)} placeholder="0" /></div>
+              {tipo !== "dividendo" && <div><label>PREZZO (€)</label><input type="number" step="any" value={prezzo} onChange={e => setPrezzo(e.target.value)} placeholder="0.00" /></div>}
+              <div><label>DATA</label><input type="date" value={data} onChange={e => setData(e.target.value)} /></div>
             </div>
-            <div style={{ marginTop: 14 }}>
-              <label>NOTE (opzionale)</label>
-              <input value={note} onChange={e => setNote(e.target.value)} placeholder="es. PAC mensile" />
-            </div>
+            <div style={{ marginTop: 14 }}><label>NOTE</label><input value={note} onChange={e => setNote(e.target.value)} placeholder="es. PAC mensile" /></div>
             <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
               <button type="submit" className="btn-primary">Registra</button>
               <button type="button" className="btn-ghost" onClick={() => setShowForm(false)}>Annulla</button>
@@ -616,14 +627,11 @@ function Movimenti({ movimenti, posizioni, onAdd }) {
         <div className="card" style={{ textAlign: "center", padding: 60, color: "#4a4858" }}>
           <div style={{ fontSize: 40, marginBottom: 16 }}>↕</div>
           <div style={{ fontSize: 15 }}>Nessun movimento registrato</div>
-          <div style={{ fontSize: 13, marginTop: 8 }}>I movimenti futuri (PAC, acquisti, vendite) saranno tracciati qui</div>
         </div>
       ) : (
         <div className="card" style={{ padding: 0, overflow: "hidden" }}>
           <table>
-            <thead>
-              <tr><th>Data</th><th>Tipo</th><th>Ticker</th><th>Quantità</th><th>Prezzo</th><th>Controvalore</th><th>Note</th></tr>
-            </thead>
+            <thead><tr><th>Data</th><th>Tipo</th><th>Ticker</th><th>Quantità</th><th>Prezzo</th><th>Controvalore</th><th>Note</th></tr></thead>
             <tbody>
               {movimenti.map((m) => (
                 <tr key={m.id}>
@@ -653,9 +661,7 @@ function CercaTitolo() {
 
   async function search() {
     if (!query.trim()) return;
-    setLoading(true);
-    setError(null);
-    setResult(null);
+    setLoading(true); setError(null); setResult(null);
     try {
       const ticker = query.trim().toUpperCase();
       const url = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=1mo`;
@@ -664,11 +670,9 @@ function CercaTitolo() {
       const data = JSON.parse(json.contents);
       const q = data?.chart?.result?.[0];
       if (!q) throw new Error("Titolo non trovato");
-      const meta = q.meta;
-      const closes = q.indicators?.quote?.[0]?.close || [];
-      setResult({ meta, closes, ticker });
+      setResult({ meta: q.meta, closes: q.indicators?.quote?.[0]?.close || [], ticker });
     } catch {
-      setError("Titolo non trovato o errore di rete. Prova con il ticker Yahoo (es. ENEL.MI, AAPL, BTC-USD)");
+      setError("Titolo non trovato. Prova con il ticker Yahoo (es. ENEL.MI, AAPL, BTC-USD)");
     }
     setLoading(false);
   }
@@ -677,12 +681,10 @@ function CercaTitolo() {
     <div>
       <h1 style={{ fontSize: 26, fontWeight: 600, marginBottom: 6, letterSpacing: "-.02em" }}>Cerca titolo</h1>
       <p style={{ color: "#5a5868", fontSize: 14, marginBottom: 28 }}>Inserisci il ticker Yahoo Finance — es. ENEL.MI · AAPL · BTC-USD · VWCE.AS</p>
-
       <div style={{ display: "flex", gap: 10, marginBottom: 24 }}>
         <input value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => e.key === "Enter" && search()} placeholder="Ticker (es. ENI.MI, AAPL, BTC-USD)" style={{ maxWidth: 320 }} />
         <button className="btn-primary" onClick={search} disabled={loading}>{loading ? "Carico..." : "Cerca"}</button>
       </div>
-
       {error && <div style={{ background: "#1f0808", border: "1px solid #3a1010", borderRadius: 12, padding: "14px 18px", color: "#e24b4a", fontSize: 13 }}>{error}</div>}
       {result && <TitoloCard result={result} />}
     </div>
@@ -696,7 +698,6 @@ function TitoloCard({ result }) {
   const first = validCloses[0];
   const change = first > 0 ? ((last - first) / first) * 100 : 0;
   const currency = meta.currency || "USD";
-
   const W = 560, H = 120, pad = 10;
   const min = Math.min(...validCloses);
   const max = Math.max(...validCloses);
@@ -734,7 +735,7 @@ function TitoloCard({ result }) {
           { label: "Mercato", val: meta.exchangeName || "—" },
         ].map(k => (
           <div key={k.label} className="card" style={{ padding: "14px 16px" }}>
-            <div style={{ fontSize: 11, color: "#5a5868", marginBottom: 6, letterSpacing: ".04em" }}>{k.label.toUpperCase()}</div>
+            <div style={{ fontSize: 11, color: "#5a5868", marginBottom: 6 }}>{k.label.toUpperCase()}</div>
             <div className="mono" style={{ fontSize: 14 }}>{k.val}</div>
           </div>
         ))}
